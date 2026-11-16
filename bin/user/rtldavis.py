@@ -148,6 +148,14 @@ MPH_TO_MPS = 1609.34 / 3600.0 # meter/mile * hour/second
 # of weewx.conf to override it.
 USE_WIND_FRACTION = True
 
+# True: pass the 10-minute gust from the gust packets to weewx as windGust.
+# False (default): leave windGust to weewx, which takes the highest windSpeed
+# in each archive interval. The packet gust is whole mph (rounded down) and
+# covers 10 minutes rather than the archive interval.
+# Default only; set store_packet_gust = True/False in the [Rtldavis] section
+# of weewx.conf to override it. See lheijst/weewx-rtldavis issue #25.
+STORE_PACKET_GUST = False
+
 def loader(config_dict, engine):
     return RtldavisDriver(engine, config_dict)
 
@@ -701,6 +709,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         'inTemp': 'temp_in',  # temperature of optional BMP280 module
         'windSpeed': 'wind_speed',
         'windDir': 'wind_dir',
+        'windGust': 'wind_gust',
         'outTemp': 'temperature',
         'outHumidity': 'humidity',
         'inHumidity': 'humidity_in',
@@ -765,6 +774,11 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         global USE_WIND_FRACTION
         USE_WIND_FRACTION = tobool(stn_dict.get('use_wind_fraction', USE_WIND_FRACTION))
         loginf('use_wind_fraction is %s' % USE_WIND_FRACTION)
+        # store_packet_gust in the [Rtldavis] section of weewx.conf
+        # overrides the STORE_PACKET_GUST default near the top of this file
+        global STORE_PACKET_GUST
+        STORE_PACKET_GUST = tobool(stn_dict.get('store_packet_gust', STORE_PACKET_GUST))
+        loginf('store_packet_gust is %s' % STORE_PACKET_GUST)
 
         # modification by Luc Heijst
         self.last_hum = None
@@ -1244,8 +1258,14 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 if not(gust_raw == 0 and gust_index_raw == 0):
                     dbg_parse(2, "W10=%s gust_index_raw=%s" %
                               (gust_raw, gust_index_raw))
-                    # don't store the 10-min gust data because there is no
-                    # field for it reserved in the standard wview schema
+                    # Optionally store the 10-min gust (whole mph; the packet
+                    # carries no fraction for it). Off by default: set
+                    # store_packet_gust = True in the [Rtldavis] section of
+                    # weewx.conf to turn it on. The weewx wview_extended
+                    # schema has a windGust field. See
+                    # lheijst/weewx-rtldavis issue #25.
+                    if STORE_PACKET_GUST:
+                        data['wind_gust'] = gust_raw * MPH_TO_MPS
             elif message_type == 0xA:
                 # outside humidity
                 # message examples:
