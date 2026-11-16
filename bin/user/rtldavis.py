@@ -142,6 +142,12 @@ DEBUG_PARSE = 0
 DEBUG_RTLD = 0
 MPH_TO_MPS = 1609.34 / 3600.0 # meter/mile * hour/second
 
+# True: wind speed = speed byte + 1/16 mph fraction, as the console shows it.
+# False: original behaviour (whole mph with error correction).
+# Default only; set use_wind_fraction = True/False in the [Rtldavis] section
+# of weewx.conf to override it.
+USE_WIND_FRACTION = True
+
 def loader(config_dict, engine):
     return RtldavisDriver(engine, config_dict)
 
@@ -754,6 +760,11 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         DEBUG_RAIN = int(stn_dict.get('debug_rain', DEBUG_RAIN))
         global DEBUG_RTLD
         DEBUG_RTLD = int(stn_dict.get('debug_rtld', DEBUG_RTLD))
+        # use_wind_fraction in the [Rtldavis] section of weewx.conf
+        # overrides the USE_WIND_FRACTION default near the top of this file
+        global USE_WIND_FRACTION
+        USE_WIND_FRACTION = tobool(stn_dict.get('use_wind_fraction', USE_WIND_FRACTION))
+        loginf('use_wind_fraction is %s' % USE_WIND_FRACTION)
 
         # modification by Luc Heijst
         self.last_hum = None
@@ -1068,21 +1079,40 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 else:
                     wind_dir_pro = 9.0 + (wind_dir_raw - 1) * 342.0 / 253.0
 
-                    # Vantage Vue
-                    wind_dir_vue = wind_dir_raw * 1.40625 + 0.3
+                # Vantage Vue
+                wind_dir_vue = wind_dir_raw * 1.40625 + 0.3
 
-                    # wind error correction is by raw byte values
-                    wind_speed_ec = round(calc_wind_speed_ec(wind_speed_raw, wind_dir_raw))
+                # wind error correction is by raw byte values
+                wind_speed_ec = round(calc_wind_speed_ec(wind_speed_raw, wind_dir_raw))
 
-                    data['wind_speed_ec'] = wind_speed_ec
-                    data['wind_speed_raw'] = wind_speed_raw
-                    data['wind_dir'] = wind_dir_pro
-                    data['wind_speed'] = wind_speed_ec * MPH_TO_MPS
-                    dbg_parse(2, "WS=%s WD=%s WS_raw=%s WS_ec=%s WD_raw=%s WD_pro=%s WD_vue=%s" %
-                              (data['wind_speed'], data['wind_dir'],
-                               wind_speed_raw, wind_speed_ec,
-                               wind_dir_raw if wind_dir_raw <= 180 else 360 - wind_dir_raw,
-                               wind_dir_pro, wind_dir_vue))
+                # Newer transmitters send a 1/16 mph fraction of the wind
+                # speed in a nibble that older ones leave unused: the low
+                # nibble of pkt[5], or the high nibble of pkt[4] in type 9
+                # (gust) messages. The WeatherLink console shows
+                # speed byte + fraction, without the error correction
+                # above. Set use_wind_fraction = False in the [Rtldavis]
+                # section of weewx.conf to get the old behaviour back.
+                if USE_WIND_FRACTION:
+                    if (pkt[0] >> 4) == 9:
+                        wind_fraction = (pkt[4] >> 4) / 16.0
+                    else:
+                        wind_fraction = (pkt[5] & 0x0F) / 16.0
+                    wind_speed_out = wind_speed_raw + wind_fraction
+                else:
+                    wind_speed_out = wind_speed_ec
+
+                # (these lines used to sit inside the final else: above, so
+                # wind speed and direction were dropped whenever the raw
+                # direction byte was exactly 0 or 255)
+                data['wind_speed_ec'] = wind_speed_ec
+                data['wind_speed_raw'] = wind_speed_raw
+                data['wind_dir'] = wind_dir_pro
+                data['wind_speed'] = wind_speed_out * MPH_TO_MPS
+                dbg_parse(2, "WS=%s WD=%s WS_raw=%s WS_ec=%s WD_raw=%s WD_pro=%s WD_vue=%s" %
+                          (data['wind_speed'], data['wind_dir'],
+                           wind_speed_raw, wind_speed_ec,
+                           wind_dir_raw if wind_dir_raw <= 180 else 360 - wind_dir_raw,
+                           wind_dir_pro, wind_dir_vue))
 
             # data from both iss sensors and extra sensors on
             # Anemometer Transport Kit
