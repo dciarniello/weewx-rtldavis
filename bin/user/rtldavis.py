@@ -54,7 +54,21 @@ Run rtld on a thread and push the output onto a queue.
     temp_hum_2_channel = 0
     # rain bucket type (0: 0.01 inch, 1: 0.2 mm)
     rain_bucket_type = 1
-    
+
+    # The type of ISS anemometer, which decides how the wind direction is
+    # decoded: vue (Vantage Vue) or pro (Vantage Pro or Pro2). Default is vue.
+    station_type = vue
+
+    # Wind speed: True = speed byte plus the 1/16 mph fraction that newer ISS
+    # transmitters send (this is what the WeatherLink console displays);
+    # False = whole mph with the old wind error correction. Default is True.
+    use_wind_fraction = True
+
+    # Store the 10-minute gust from the gust packets as windGust (whole mph).
+    # False leaves windGust to weewx, which takes the highest windSpeed in
+    # each archive interval. Default is False.
+    store_packet_gust = False
+
     # Print debug messages
     # 0=no logging; 1=minimum logging; 2=normal logging; 3=detailed logging
     debug_parse = 0
@@ -155,6 +169,14 @@ USE_WIND_FRACTION = True
 # Default only; set store_packet_gust = True/False in the [Rtldavis] section
 # of weewx.conf to override it. See lheijst/weewx-rtldavis issue #25.
 STORE_PACKET_GUST = False
+
+# Station type, which decides how the wind direction is decoded:
+# 'vue': Vantage Vue, a 9-bit angle (the lowest bit is bit 1 of the 5th
+#        packet byte), 360/512 degrees per step.
+# 'pro': Vantage Pro or Pro2 anemometer.
+# Default only; set station_type = vue or pro in the [Rtldavis] section of
+# weewx.conf to override it.
+STATION_TYPE = 'vue'
 
 def loader(config_dict, engine):
     return RtldavisDriver(engine, config_dict)
@@ -683,7 +705,21 @@ class RtldavisConfigurationEditor(weewx.drivers.AbstractConfEditor):
     temp_hum_2_channel = 0
     # rain bucket type (0: 0.01 inch, 1: 0.2 mm)
     rain_bucket_type = 1
-    
+
+    # The type of ISS anemometer, which decides how the wind direction is
+    # decoded: vue (Vantage Vue) or pro (Vantage Pro or Pro2). Default is vue.
+    station_type = vue
+
+    # Wind speed: True = speed byte plus the 1/16 mph fraction that newer ISS
+    # transmitters send (this is what the WeatherLink console displays);
+    # False = whole mph with the old wind error correction. Default is True.
+    use_wind_fraction = True
+
+    # Store the 10-minute gust from the gust packets as windGust (whole mph).
+    # False leaves windGust to weewx, which takes the highest windSpeed in
+    # each archive interval. Default is False.
+    store_packet_gust = False
+
     # Print debug messages
     # 0=no logging; 1=minimum logging; 2=normal logging; 3=detailed logging
     debug_parse = 0
@@ -779,6 +815,13 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         global STORE_PACKET_GUST
         STORE_PACKET_GUST = tobool(stn_dict.get('store_packet_gust', STORE_PACKET_GUST))
         loginf('store_packet_gust is %s' % STORE_PACKET_GUST)
+        # station_type in the [Rtldavis] section of weewx.conf
+        # overrides the STATION_TYPE default near the top of this file
+        global STATION_TYPE
+        STATION_TYPE = str(stn_dict.get('station_type', STATION_TYPE)).strip().lower()
+        if STATION_TYPE not in ('vue', 'pro'):
+            raise ValueError("station_type must be 'vue' or 'pro', not '%s'" % STATION_TYPE)
+        loginf('station_type is %s' % STATION_TYPE)
 
         # modification by Luc Heijst
         self.last_hum = None
@@ -1093,8 +1136,12 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 else:
                     wind_dir_pro = 9.0 + (wind_dir_raw - 1) * 342.0 / 253.0
 
-                # Vantage Vue
-                wind_dir_vue = wind_dir_raw * 1.40625 + 0.3
+                # Vantage Vue: a 9-bit angle. The direction byte is the upper
+                # 8 bits and bit 1 of pkt[4] is the lowest bit, so the
+                # resolution is 360/512 degrees. This matched the console's
+                # direction on 257 of 258 packets. (The formula that used to
+                # be here, wind_dir_raw * 1.40625 + 0.3, matched only 190.)
+                wind_dir_vue = ((wind_dir_raw << 1) | ((pkt[4] >> 1) & 1)) * 360.0 / 512.0
 
                 # wind error correction is by raw byte values
                 wind_speed_ec = round(calc_wind_speed_ec(wind_speed_raw, wind_dir_raw))
@@ -1120,7 +1167,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 # direction byte was exactly 0 or 255)
                 data['wind_speed_ec'] = wind_speed_ec
                 data['wind_speed_raw'] = wind_speed_raw
-                data['wind_dir'] = wind_dir_pro
+                data['wind_dir'] = wind_dir_vue if STATION_TYPE == 'vue' else wind_dir_pro
                 data['wind_speed'] = wind_speed_out * MPH_TO_MPS
                 dbg_parse(2, "WS=%s WD=%s WS_raw=%s WS_ec=%s WD_raw=%s WD_pro=%s WD_vue=%s" %
                           (data['wind_speed'], data['wind_dir'],
