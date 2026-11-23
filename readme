@@ -148,12 +148,26 @@ Note: the -tf and -tr options are added automatic to the command with the option
     temp_hum_2_channel = 0
     # rain bucket type (0: 0.01 inch, 1: 0.2 mm)
     rain_bucket_type = 1
-    
+
+    # The type of ISS anemometer, which decides how the wind direction is
+    # decoded: vue (Vantage Vue) or pro (Vantage Pro or Pro2). Default is vue.
+    station_type = vue
+
+    # Wind speed: True = speed byte plus the 1/16 mph fraction that newer ISS
+    # transmitters send (this is what the WeatherLink console displays);
+    # False = whole mph with the old wind error correction. Default is True.
+    use_wind_fraction = True
+
+    # Store the 10-minute gust from the gust packets as windGust (whole mph).
+    # False leaves windGust to weewx, which takes the highest windSpeed in
+    # each archive interval. Default is False.
+    store_packet_gust = False
+
     # Print debug messages
     #  0=no logging; 1=minimum logging; 2=normal logging; 3=detailed logging
     debug_parse = 0    # 0
     debug_rain = 0     # 0
-	debug_rtld = 0     # rtldavis logging: 1=inf; 2=(1)+data+chan; 3=(2)+pkt
+    debug_rtld = 0     # rtldavis logging: 1=inf; 2=(1)+data+chan; 3=(2)+pkt
 
     log_unknown_sensors = True
     log_unmapped_sensors = True

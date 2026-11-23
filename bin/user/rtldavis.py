@@ -439,13 +439,14 @@ class AsyncReader(threading.Thread):
         self._fd = fd
         self._queue = queue
         self._running = False
-        self.setDaemon(True)
-        self.setName(label)
+        self.daemon = True
+        self.name = label
 
     def run(self):
-        logdbg("start async reader for %s" % self.getName())
+        logdbg("start async reader for %s" % self.name)
         self._running = True
-        for line in iter(self._fd.readline, ''):
+        # the pipe delivers bytes on Python 3, so the end-of-input marker is b''
+        for line in iter(self._fd.readline, b''):
             self._queue.put(line)
             if not self._running:
                 break
@@ -546,8 +547,8 @@ class Packet:
 
 
 class DATAPacket(Packet):
-    IDENTIFIER = re.compile("^\d\d:\d\d:\d\d.[\d]{6} [0-9A-F][0-7][0-9A-F]{14}")
-    PATTERN = re.compile('([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2}) ([\d]+) ([\d]+) ([\d]+) ([\d]+)')
+    IDENTIFIER = re.compile(r"^\d\d:\d\d:\d\d.[\d]{6} [0-9A-F][0-7][0-9A-F]{14}")
+    PATTERN = re.compile(r'([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2}) ([\d]+) ([\d]+) ([\d]+) ([\d]+)')
 
     @staticmethod
     def parse_text(self, payload, lines):
@@ -576,8 +577,8 @@ class DATAPacket(Packet):
 class CHANNELPacket(Packet):
     IDENTIFIER = re.compile("ChannelIdx:")
     # chan: 13:44:13.116046 Hop: {ChannelIdx:3 ChannelFreq:868437250 FreqError:431 Transmitter:1}
-    PATTERNv13 = re.compile('ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+) Transmitter:([\d]+)')
-    PATTERNv12 = re.compile('ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+)')
+    PATTERNv13 = re.compile(r'ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+) Transmitter:([\d]+)')
+    PATTERNv12 = re.compile(r'ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+)')
 
     @staticmethod
     def parse_text(self, payload, lines):
